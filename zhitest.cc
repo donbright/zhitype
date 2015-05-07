@@ -35,6 +35,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 /*
 A unicode TrueType(TM) font renderer for microcontrollers and e-paper
 
+(Note: TrueType(TM) is a trademark and usage here does not imply endorsement)
+
 Goals
 
 1. very very simple code, skip unnecessary steps
@@ -125,6 +127,93 @@ is a trick. There is a 'sign' bit in the 'flag' for 8 bit numbers....
 
 All of this space-packing makes te unpacking code a bit complicated.
 
+
+*/
+
+
+
+
+/*
+
+On the mathematics of the Bezier Curve
+
+Or... how to draw Bezier Curves without using multiplication, division,
+floating point numbers, or other abominations of modern savagery.
+(So that we might not assault our poor microcontroller with operations
+requiring dozens of clockcycles)
+
+0. Read the wikipedia article about Beziers. Now tear it up and throw it away.
+
+1. Next, almost everything you ever learned in school about geometry
+
+2. OK, now forget that algebra exists, Cartesian coordiantes OK, algebra no.
+
+3. The bezier curve is a conic section. It's a parabola.
+
+4. Parabola is the same thing you get when you throw a ball in the air and
+ it comes back to earth.
+
+5. It is quite easy to draw a ball in the air without using
+multiplication, division, or floating point. Consider a ball with an x
+coordinate and y coordinate.
+
+ A. set y accelleration = -9.8
+ B. run in a loop:
+   x position = x position + 1
+   y position = y position + y velocity
+   y velocity = y velocity + y accelleration
+   draw a point at x,y
+
+This will produce a perfectly nice parabola.
+
+Note that by setting accelleration to a constant we are essentially
+simulating gravity. All of the calculus and stuff (dy/dt) is basically
+saying the same thing. But this is alot simpler.
+
+Notice, there is no multiplication, division, equations, squares, sqrts,
+transcendentals, irrationals, sin, cosine, etc etc etc. It's just addition
+and subtraction.
+
+And thus we have drawn a Bezier curve using only addition and subtraction.
+
+And... every bezier curve is a parabola.
+
+
+The question is... how to take this simple situation on plain x-y coordinates
+and translate it to the Beziers as used in TrueType(TM) fonts? Those Beziers
+are given as... three points. Two 'on points' and one 'control point'. How
+does this work?
+
+
+Step 1. Find the directrix and focus of the Parabola. What's a directrix
+and focus? Go back to the Greeks and the 18th century school of Conics...
+and then come back.
+
+For any parabola, and two points on it, you can imagine it traces
+the trajectory of a ball thrown..... where the Force upon it, the gravity
+if you will, is directly perpendicular in dirction to the Directrix.
+
+See? Now, of course, x cannot just be incremented by one anymore. . .
+and Y cannot be incremented by a simple velocity/acceleration addition. Why?
+Because sometimes the parabola will be rotated with respect to the x-axis
+and y-axis plane. It will be facing maybe 30 degrees or whatever.
+
+But what we can do.... is look at the force-accelleration and the X velocity
+as vectors. Now, break them down into their x and y pieces to match our
+main coordinate system. For example if the directrix is heading on a slope
+from 0,0 to 3,4, then you can think of it as a vector with two parts. 
+(3,0) and (4,0). Now. We can add a fraction of this each loop and we will
+hopefuly get the resulsts sti.
+
+
+
+
+
+See Also
+
+Art of Assembly, by Michael Abrash
+8088MPH demo, by Hornet & CRTC & DESiRE
+Dr Norman Wilderger's youtube channel
 
 */
 
