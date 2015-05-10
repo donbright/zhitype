@@ -88,6 +88,7 @@ https://developer.apple.com/fonts/TrueType-Reference-Manual/RM01/Chap1.html
 http://www.freetype.org/freetype2/docs/reference/ft2-truetype_tables.html
 https://developer.apple.com/fonts/TrueType-Reference-Manual/RM06/Chap6.html
 https://www.microsoft.com/typography/tt/ttf_spec/ttch02.doc
+http://scripts.sil.org/cms/scripts/page.php?site_id=nrsi&id=iws-chapter08
 http://cplusplus.com/
 Alternatives:
 http://en.wikipedia.org/wiki/SFNT
@@ -96,7 +97,8 @@ https://github.com/ccxvii/snippets/blob/master/ttfdump.c
 http://manpages.ubuntu.com/manpages/maverick/man1/ttfdump.1.html
 FreeType's glyph loader is in a file named 'ttgload.c', which you can google.
 (it's in dozens of projects). See http://freetype.org
-
+TTF Security issues: (which this code completely ignores for smallness)
+https://github.com/khaledhosny/ots
 
 
 How does TrueType work?
@@ -243,11 +245,24 @@ differences of the two vectors.
 
 
 
+
+Another view.
+The 'linear interpolation'. Divide both legs into equal parts. draw points
+delineating the parts. Draw line between the first point on leg A and the
+last point on leg B. Second point on leg A and the next-to-last point on
+leg B. Keep going.
+
+How can we do this on code? Draw bresenham lines .... simply don't draw
+certain pieces. In the end, you get a complete curve made of the lines!
+
+put the points close enough together and .... you get a very smooth curve.
+
 See Also
 
 Art of Assembly, by Michael Abrash
 8088MPH demo, by Hornet & CRTC & DESiRE
 Dr Norman Wilderger's youtube channel
+
 
 */
 
@@ -275,6 +290,22 @@ union int16 {
 	int16_t int16;
 	uint8_t uint8[2];
 };
+
+typedef struct cmap_subtable_format4_t {
+	union uint16 format; //	Format number is set to 4
+	union uint16 length; //	Length of subtable in bytes
+	union uint16 language; //	Language code (see above)
+	union uint16 segCountX2; //	2 * segCount
+	union uint16 searchRange; //	2 * (2**FLOOR(log2(segCount)))
+	union uint16 entrySelector; //	log2(searchRange/2)
+	union uint16 rangeShift; //	(2 * segCount) - searchRange
+	uint32_t endCodeArray; // uint16[segCount] 	Ending character code for each segment, last = 0xFFFF.
+	union uint16 reservedPad; // 	This value should be zero
+	uint32_t startCodeArray; // uint16[segCount] 	Starting character code for each segment
+	uint32_t idDeltaArray; // uint16[segCount] 	Delta for all character codes in segment
+	uint32_t idRangeOffsetArray; // uint16[segCount] Offset in bytes to glyph indexArray, or 0
+	uint32_t glyphIndexArray; // uint16[variable]
+} cmap_subtable_format4;
 
 void read_uint32(union uint32 &data, FILE *file) {
 	fread(&data.uint8[3],1,1,file);
@@ -373,6 +404,123 @@ void read_head_table( fontinfo &fi, FILE * f ) {
 	fseek( f, 2, SEEK_CUR ); //font diection hint
 	read_int16( fi.head_table_indexToLocFormat, f );
 	fseek( f, 2, SEEK_CUR ); //glyphDataFormat
+}
+
+// given 16 bit unicode, look up glyg index in a CMAP Format 4 table
+// 32 bit unicode is not compatible with format 4 tables.
+void lookup_cmap_format4( FILE * f, union uint32 &glyf_index, uint16_t &unicode16 ) {
+	printf(" searching fmt4 table for unicode %u x%04x\n",unicode16,unicode16 );
+	cmap_subtable_format4 fm;
+	read_uint16( fm.length, f );
+	read_uint16( fm.language, f );
+	read_uint16( fm.segCountX2, f );
+	read_uint16( fm.searchRange, f );
+	read_uint16( fm.entrySelector, f );
+	read_uint16( fm.rangeShift, f );
+	printf( "length %u\n", fm.length.uint16 );
+	printf( "language %u\n", fm.language.uint16 );
+	printf( "segCountX2 %u\n", fm.segCountX2.uint16 );
+	printf( "searchRange %u\n", fm.searchRange.uint16 );
+	printf( "entrySelector %u\n", fm.entrySelector.uint16 );
+	printf( "rangeShift %u\n", fm.rangeShift.uint16 );
+	fm.endCodeArray = ftell( f );
+	fm.startCodeArray = fm.endCodeArray + fm.segCountX2.uint16 + 2;
+	// skip uint16 reservedPad
+	fm.idDeltaArray = fm.startCodeArray + fm.segCountX2.uint16;
+	fm.idRangeOffsetArray = fm.idDeltaArray + fm.segCountX2.uint16;
+	fm.glyphIndexArray = fm.idRangeOffsetArray + fm.segCountX2.uint16;
+	uint32_t endcode_i = fm.endCodeArray;
+	uint32_t startcode_i = fm.startCodeArray;
+	uint32_t iddelta_i = fm.idDeltaArray;
+	uint32_t idrangeoffset_i = fm.idRangeOffsetArray;
+	uint16_t segCount = fm.segCountX2.uint16 / 2;
+	union uint16 endcode, startcode, iddelta, idrangeoffset;
+	bool done = false;
+	int counter = 0;
+	while (!done) {
+		counter++;
+		if (counter>segCount) break;
+		fseek( f, endcode_i, SEEK_SET );
+		read_uint16( endcode, f );
+		printf("end code x%04x\n",endcode.uint16);
+		if (endcode.uint16 >= unicode16) {
+			printf(" >= unicode \n");
+			fseek( f, startcode_i, SEEK_SET );
+			read_uint16( startcode, f );
+			printf("start code x%04x\n",startcode.uint16);
+			if (startcode.uint16 <= unicode16) {
+				printf(" <= unicode \n");
+				fseek( f, iddelta_i, SEEK_SET );
+				read_uint16( iddelta, f );
+				fseek( f, idrangeoffset_i, SEEK_SET );
+				read_uint16( idrangeoffset, f );
+				printf("end %x strt %x delt %u %x rof %x\n", endcode.uint16, startcode.uint16, iddelta.uint16, iddelta.uint16, idrangeoffset.uint16 );
+				if (idrangeoffset.uint16==0) {
+					printf( "rof 0, add delta to unicode\n");
+					glyf_index.uint32 = ( iddelta.uint16 + unicode16 ) % 0x10000;
+				} else {
+					printf( "rof !0\n");
+					union uint16 tmp;
+					tmp.uint16 = idrangeoffset.uint16 + 2*(unicode16-startcode.uint16);
+					fseek(f, idrangeoffset_i + tmp.uint16, SEEK_SET);
+					read_uint16( tmp, f );
+					glyf_index.uint32 = tmp.uint16;
+				}
+			}
+			break;
+		} else {
+			printf(" keep looking..\n");
+		}
+		endcode_i+=2;
+		startcode_i+=2;
+		iddelta_i+=2;
+		idrangeoffset_i+=2;
+	}
+}
+
+// given a Unicode look up the glyf index
+void lookup_glyf_index( fontinfo &fi, uint32_t &unicode32, union uint32 &glyf_index, FILE * f ) {
+
+	// init glyf_index using MISSING CHARACTER standard index of 0.
+	// if we can't find anything, it will be 0 on return.
+
+	glyf_index.uint32 = 0;
+	fseek( f, fi.cmap_table_offset.uint32, SEEK_SET );
+	fseek( f, 2, SEEK_CUR ); //skip version
+	union uint16 numberSubtables;
+	union uint32 offset;
+	read_uint16( numberSubtables, f );
+	uint32_t subtable_i = ftell(f);
+	union uint16 platformID, platformSpecificID;
+	union uint16 format;
+	for (uint16_t i=0;i<numberSubtables.uint16;i++ ) {
+		fseek( f, subtable_i, SEEK_SET );
+		read_uint16( platformID, f );
+		read_uint16( platformSpecificID, f );
+		read_uint32( offset, f );
+		subtable_i = ftell(f);
+		printf(" platID %i, platSpecID %02i, offset x%08x ",platformID.uint16,platformSpecificID.uint16, offset.uint32);
+		bool ok = false;
+		if (platformID.uint16==0) ok = true;
+		else if (platformID.uint16==3 && platformSpecificID.uint16==10) ok = true;
+		else if (platformID.uint16==3 && platformSpecificID.uint16==1) ok = true;
+		if (ok) {
+			fseek( f, fi.cmap_table_offset.uint32, SEEK_SET );
+			fseek( f, offset.uint32, SEEK_CUR );
+			read_uint16( format, f );
+			printf("format %u\n",format.uint16);
+			if (format.uint16==4) {
+				if (unicode32>0xFFFF) {
+					printf("unicode too big for format 4 table\n");
+				}
+				uint16_t unicode16 = unicode32;
+				lookup_cmap_format4( f, glyf_index, unicode16 );
+			}
+			break;
+		} else {
+			printf("< cant parse this kind of cmap\n");
+		}
+	}
 }
 
 // given an glyph index, look up the byte offset from the begin of glyf table.
@@ -535,22 +683,25 @@ void do_glyf_data( glyf_description &gd, FILE *f, uint32_t glyfdataoffset ){
 	union int16 xdelta,ydelta;
 	glyf_point gp;
 	printf("idx endp %i flg %i x %i y %i\n",endpts_i,flags_i,x_i,y_i);
+	union uint16 prev_endpt_index;
+	prev_endpt_index.uint16 = 0;
 	for (int i=0;i<gd.numberOfContours.int16;i++){
 		fseek( f, endpts_i, SEEK_SET );
 		read_uint16( endpt_index, f );
 		endpts_i = ftell(f);
 		repeat_counter = 0;
-		for (int j=0;j<endpt_index.uint16+1;j++) {
+		for (int j=prev_endpt_index.uint16;j<endpt_index.uint16+1;j++) {
 			readflag( flag, flags_i, repeat_counter, f );
 			read_x_coord( xdelta, flag, x_i, f );
 			read_y_coord( ydelta, flag, y_i, f );
-			printf("yd %i\n",ydelta.int16);
-			printf("idx 4endp %i flg %i x %i y %i\n",endpts_i,flags_i,x_i,y_i);
+			printf("idxes: endp %i flg %i x %i y %i\n",endpts_i,flags_i,x_i,y_i);
 			printf("-\\\n");
+			printf("contour idx %i point idx %i\n",i,j);
 			printglyfflag( flag );
 			printf("xdelta %i \t ydelta %i \n", xdelta.int16, ydelta.int16 );
 			printf("-/\n");
 		}
+		prev_endpt_index.uint16 = endpt_index.uint16+1;
 	}
 }
 
@@ -624,10 +775,14 @@ int main(int argc, char * argv[]) {
 	read_table_directories( fi, file );
 
 	read_head_table( fi, file );
+	printinfo( fi );
+
+	uint32_t unicode = 65;
+	//uint32_t unicode = 0x20d5;
+	union uint32 glyf_index;
+	lookup_glyf_index( fi, unicode, glyf_index, file );
 
 	union uint32 glyf_offset;
-	union uint32 glyf_index;
-	glyf_index.uint32 = 37;
 	lookup_glyf_offset( fi, glyf_index, glyf_offset, file );
 	printf("index, %u x%x, offset, x%x\n", glyf_index.uint32, glyf_index.uint32, glyf_offset.uint32 );
 	fseek( file, fi.glyf_table_offset.uint32, SEEK_SET);
@@ -635,10 +790,7 @@ int main(int argc, char * argv[]) {
 	fseek( file, glyf_offset.uint32, SEEK_CUR);
 	glyf_description gd;
 	read_glyf_description( gd, file );
-#ifdef DEBUG
-	printinfo( fi );
 	printglyfdescr( gd );
-#endif // DEBUG
 	do_glyf_data( gd, file, ftell(file) );
 
 	return 0;
