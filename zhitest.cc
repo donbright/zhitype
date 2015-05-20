@@ -91,10 +91,12 @@ https://www.microsoft.com/typography/tt/ttf_spec/ttch02.doc
 http://scripts.sil.org/cms/scripts/page.php?site_id=nrsi&id=iws-chapter08
 http://cplusplus.com/
 Alternatives:
+https://github.com/nothings/stb/blob/master/stb_truetype.h
 https://github.com/behdad/fonttools/
 http://en.wikipedia.org/wiki/SFNT
 https://code.google.com/p/sfntly/
 https://github.com/ccxvii/snippets/blob/master/ttfdump.c
+Font Forge's ./fontforge/parsettf.c:
 http://manpages.ubuntu.com/manpages/maverick/man1/ttfdump.1.html
 FreeType's glyph loader is in a file named 'ttgload.c', which you can google.
 (it's in dozens of projects). See http://freetype.org

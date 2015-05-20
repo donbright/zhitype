@@ -1,0 +1,4 @@
+# given a list of fields in a struct, make some go fmt.Println to 
+# dump the data
+cat x | awk ' { print $1 "__ht." $1 } ' | sed s/"^"/"fmt.Printf(\""/g | sed s/"__"/"\\n\"",/g | sed s/$/")"/g > /tmp/z
+
