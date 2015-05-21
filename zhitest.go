@@ -38,6 +38,18 @@ type Fd_table_directory_entry struct {
 	Length uint32
 }
 
+func New_Font_directory( f io.Reader ) (fd *Font_directory, err error) {
+	fd = &Font_directory{}
+	err = binary.Read( f, binary.BigEndian, &fd.Offset_table)
+	fd.Table_directory = make( map[uint32]Fd_table_directory_entry )
+	for i := uint16(0); i< fd.Offset_table.NumTables; i++ {
+		tmp := Fd_table_directory_entry{}
+		err = binary.Read( f, binary.BigEndian, &tmp )
+		fd.Table_directory[tmp.Tag] = tmp
+	}
+	return fd, err
+}
+
 type Head_table struct {
 	Version Fixed
 	FontRevision Fixed
@@ -58,23 +70,191 @@ type Head_table struct {
 	GlyphDataFormat int16
 }
 
-type loca_table_short_version struct {
+func New_Head_table( f io.Reader ) (ht *Head_table, err error) {
+	ht = &Head_table{}
+	err = binary.Read( f, binary.BigEndian, ht )
+	return ht, err
+}
+
+type Loca_table_short_version struct {
 	offsets []uint16
 }
 
-type loca_table_long_version struct { 
+type Loca_table_long_version struct { 
 	offsets []uint32
 }
 
-type cmap_table_index struct {
-	version uint16
-	numberSubtables uint16
+type Cmap_table struct {
+	Index Cmap_table_index
+	Subtables []Cmap_subtable
 }
 
-type cmap_subtable struct {
-	platformId uint16
-	platformSpecificId uint16
-	offset uint32
+type Cmap_table_index struct {
+	Version uint16
+	NumberSubtables uint16
+}
+
+type Cmap_subtable struct {
+	PlatformId uint16
+	PlatformSpecificId uint16
+	Offset uint32
+}
+
+func New_Cmap_table( f io.Reader ) (cm *Cmap_table, err error) {
+	cm = &Cmap_table{}
+	err = binary.Read( f, binary.BigEndian, &cm.Index )
+	for i := uint16(0); i<cm.Index.NumberSubtables; i++ {
+		tmp := Cmap_subtable{}
+		err = binary.Read( f, binary.BigEndian, &tmp )
+		cm.Subtables = append( cm.Subtables, tmp )
+	}
+	return cm, err
+}
+
+type Cmap_format_0 struct {
+	Format uint16
+	Length uint16
+	Language uint16
+	GlyphIndexArray [256]uint8
+}
+
+type Cmap_format_2 struct {
+	Format uint16
+	Length uint16
+	Language uint16
+	SubHeaderKeys [256]uint16
+	SubHeaders []Cmap_format_2_subHeader
+	GlyphIndexArray []uint16
+}
+
+type Cmap_format_2_subHeader struct {
+	FirstCode uint16
+	EntryCount uint16
+	IdDelta int16
+	IdRangeOffset uint16
+}
+
+type Cmap_format_4 struct {
+	Format uint16
+	Length uint16
+	Language uint16
+	SegCountX2 uint16
+	SearchRange uint16
+	EntrySelector uint16
+	RangeShift uint16
+	EndCode []uint16
+	ReservedPad uint16
+	StartCode []uint16
+	IdDelta []uint16
+	IdRangeOffset []uint16
+	GlyphIndexArray []uint16
+}
+
+type Cmap_format_6 struct {
+	Format uint16
+	Length uint16
+	Language uint16
+	FirstCode uint16
+	EntryCount uint16
+	GlyphIndexArray []uint16
+}
+
+type Cmap_format_8 struct {
+	Format Fixed
+	Length uint32
+	Language uint32
+	Is32 [65536]uint8
+	NGroups uint32
+	Groups []Cmap_format_8_group
+}
+
+type Cmap_format_8_group struct {
+	StartCharCode uint32
+	EndCharCode uint32
+	StartGlyphCode uint32
+}
+
+type Cmap_format_10 struct {
+	Format Fixed
+	Length uint32
+	Language uint32
+	StartCharCode uint32
+	NumChars uint32
+	Glyphs []uint16
+}
+
+type Cmap_format_12 struct {
+	Format Fixed
+	Length uint32
+	Language uint32
+	NGroups uint32
+}
+
+type Cmap_format_12_group struct {
+	StartCharCode uint32
+	EndCharCode uint32
+	StartGlyphCode uint32
+}
+
+type Cmap_format_13_group struct {
+	StartCharCode uint32
+	EndCharCode uint32
+	GlyphCode uint32
+}
+
+type Cmap_format_14 struct {
+	Format uint16
+	Length uint32
+	NumVarSelectorRecords uint32
+}
+
+type Cmap_14_variation_selector_record struct {
+	VarSelector [3]uint8
+	DefaultOVSOffset uint32
+	NonDefaultUVSOffset uint32
+}
+
+type Cmap_14_default_uvs_table struct {
+	NumUnicodeValueRanges uint32
+}
+
+type Cmap_14_unicode_value_range struct {
+	StartUnicodeValue [3]uint8
+	AdditionalCount uint8
+}
+
+type Cmap_14_nondefault_uvs_table struct {
+	NumUVSMappings uint32
+}
+
+type Cmap_14_uvs_mapping struct {
+	UnicodeValue [3]uint8
+	GlyphID uint16
+}
+
+type Glyf_description struct {
+	NumberOfContours int16
+	XMin FWord
+	YMin FWord
+	XMax FWord
+	YMax FWord
+}
+
+type Glyf_definition_simple struct {
+	EndPtsOfContours []uint16
+	InstructionLength uint16
+	Instructions []uint8
+	Flags []uint8
+	XCoordinateBytes []uint8 // can be uint16 or uint8
+	YCoordinateBytes []uint8 // can be uint16 or uint8
+}
+
+type Glyf_definition_compound struct {
+	Flags uint16
+	GlyphIndex uint16
+	Argument1Bytes []uint8
+	Argument2Bytes []uint8
+	// Transformation // ????
 }
 
 func (fd Font_directory) render_txt() {
@@ -116,36 +296,40 @@ func (ht Head_table) render_txt() {
 	fmt.Println(" GlyphDataFormat",ht.GlyphDataFormat)
 }
 
-func read_font_directory( f io.Reader, fd *Font_directory ) error {
-	var err error
-	if fd==nil { return err }
-	err = binary.Read( f, binary.BigEndian, &fd.Offset_table)
-	for i := uint16(0); i< fd.Offset_table.NumTables; i++ {
-		tmp := Fd_table_directory_entry{}
-		err = binary.Read( f, binary.BigEndian, &tmp )
-		fd.Table_directory[tmp.Tag] = tmp
+func (cm Cmap_table) render_txt() {
+	fmt.Println("Cmap")
+	fmt.Println("          Code1, Code2, Offset")
+	for i := uint16(0); i<cm.Index.NumberSubtables; i++ {
+		fmt.Printf("Subtable %5d\n",cm.Subtables[i])
 	}
-	return err
 }
 
-func main() {
-	//var unicode uint32 = 65
+//type Ctest struct {
+//	xcoord []uint32
+//}
 
-	var fd Font_directory
-	fd.Table_directory = make( Fd_table_directory )
-	var ht Head_table
+func main() {
+	//ct := Ctest{ xcoord: make([]uint32,500) }
+
+	var unicode uint32 = 65
+	fmt.Println("unicode to lookup:", unicode)
+
 	f, err := os.Open("FreeSerif.ttf")
 	if err != nil {
 		fmt.Println("file open failed", err )
 		return
 	}
-	err = read_font_directory( f, &fd )
-	err = binary.Read( f, binary.BigEndian, &ht )
+	fd, err := New_Font_directory( f )
+	ht, err := New_Head_table( f )
+	f.Seek( int64(fd.Table_directory[0x636d6170].Offset), 0 )
+	cm, err := New_Cmap_table( f )
+	
 	if err != nil {
 		fmt.Println("binary read failed", err )
 		return
 	}
 	fd.render_txt()
-	ht.render_txt()	
+	ht.render_txt()
+	cm.render_txt()
 }
 
